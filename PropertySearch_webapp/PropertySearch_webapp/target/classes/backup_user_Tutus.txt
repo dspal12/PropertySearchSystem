@@ -1,0 +1,312 @@
+security config.java
+=======================================================
+
+package com.dhruv.PropertySearchLogin_webapp.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+
+@Configuration
+public class SecurityConfig {
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+=======================================================
+
+UserService.java
+---------------------------------
+package com.dhruv.PropertySearchLogin_webapp.service;
+
+import com.dhruv.PropertySearchLogin_webapp.dto.LoginDTO;
+import com.dhruv.PropertySearchLogin_webapp.dto.UserDTO;
+
+import com.dhruv.PropertySearchLogin_webapp.response.LoginMessage;
+
+
+
+public interface UserService {
+    String addUser(UserDTO userdto);
+
+    LoginMessage loginUser(LoginDTO loginDTO);
+
+}
+
+=======================================================================
+UserServiceIMPL.java
+-------------------------------------------------------------
+UserServiceIMPL.java
+package com.dhruv.PropertySearchLogin_webapp.service;
+
+import com.dhruv.PropertySearchLogin_webapp.dto.LoginDTO;
+import com.dhruv.PropertySearchLogin_webapp.dto.UserDTO;
+import com.dhruv.PropertySearchLogin_webapp.entity.User;
+import com.dhruv.PropertySearchLogin_webapp.repository.UserLoginRepo;
+
+import com.dhruv.PropertySearchLogin_webapp.response.LoginMessage;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import javax.annotation.Resource;
+import java.util.Optional;
+
+@Service
+
+public class UserServiceIMPL implements UserService {
+
+    @Autowired
+    private UserLoginRepo userRepo;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+
+    @Override
+    public String addUser(UserDTO userDTO) {
+
+        User user = new User(
+
+               userDTO.getUserid(),
+               userDTO.getUsername(),
+               userDTO.getEmail(),
+               this.passwordEncoder.encode(userDTO.getPassword())
+        );
+
+        userRepo.save(user);
+
+        return user.getUsername();
+    }
+    UserDTO userDTO;
+
+    @Override
+    public LoginMessage loginUser(LoginDTO loginDTO) {
+        String msg = "";
+        User user1 = userRepo.findByEmail(loginDTO.getEmail());
+        if (user1!= null) {
+            String password = loginDTO.getPassword();
+            String encodedPassword = user1.getPassword();
+            Boolean isPwdRight = passwordEncoder.matches(password, encodedPassword);
+            if (isPwdRight) {
+                Optional<User> user = userRepo.findOneByEmailAndPassword(loginDTO.getEmail(), encodedPassword);
+                if (user.isPresent()) {
+                    return new LoginMessage("Login Success", true);
+                } else {
+                    return new LoginMessage("Login Failed", false);
+                }
+            } else {
+
+                return new LoginMessage("password Not Match", false);
+            }
+        }else {
+            return new LoginMessage("Email not exits", false);
+        }
+
+
+    }
+
+}
+===============================================================================
+Repository pkg
+UserLoginRepo.java
+--------------------------------------------------------------------
+package com.dhruv.PropertySearchLogin_webapp.repository;
+
+import com.dhruv.PropertySearchLogin_webapp.entity.User;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@EnableJpaRepositories
+@Repository
+public interface UserLoginRepo extends JpaRepository<User,Integer>
+{
+      Optional<User> findOneByEmailAndPassword(String email, String password);
+
+    User findByEmail(String email);
+}
+==========================================================================
+DTO Package
+
+LoginDTO.java
+-------------------------------------------------------------------------
+
+package com.dhruv.PropertySearchLogin_webapp.dto;
+
+public class LoginDTO {
+	private String email;
+	private String password;
+
+	public LoginDTO() {
+	}
+
+	public LoginDTO(String email, String password) {
+		this.email = email;
+		this.password = password;
+	}
+
+	public String getEmail() {
+		return email;
+	}
+
+	public void setEmail(String email) {
+		this.email = email;
+	}
+
+	public String getPassword() {
+		return password;
+	}
+
+	public void setPassword(String password) {
+		this.password = password;
+	}
+
+	@Override
+	public String toString() {
+		return "LoginDTO [email=" + email + ", password=" + password + "]";
+	}
+
+}
+=======================================================================
+
+UserDTO.java
+package com.dhruv.PropertySearchLogin_webapp.dto;
+public class UserDTO {
+
+    private int userid;
+    private String username;
+    private String email;
+    private String password;
+	
+    public UserDTO() {
+	
+		
+	}
+
+	public UserDTO(int userid, String username, String email, String password) {
+		super();
+		this.userid = userid;
+		this.username = username;
+		this.email = email;
+		this.password = password;
+	}
+
+	public int getUserid() {
+		return userid;
+	}
+
+	public void setUserid(int userid) {
+		this.userid = userid;
+	}
+
+	public String getUsername() {
+		return username;
+	}
+
+	public void setUsername(String username) {
+		this.username = username;
+	}
+
+	public String getEmail() {
+		return email;
+	}
+
+	public void setEmail(String email) {
+		this.email = email;
+	}
+
+	public String getPassword() {
+		return password;
+	}
+
+	public void setPassword(String password) {
+		this.password = password;
+	}
+
+	@Override
+	public String toString() {
+		return "PropertyDTO [userid=" + userid + ", username=" + username + ", email=" + email + ", password="
+				+ password + "]";
+	}
+    
+	
+    
+
+} 
+===========================================================================
+Controller
+
+UserController.java
+
+package com.dhruv.PropertySearchLogin_webapp.controller;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.dhruv.PropertySearchLogin_webapp.dto.LoginDTO;
+import com.dhruv.PropertySearchLogin_webapp.dto.UserDTO;
+import com.dhruv.PropertySearchLogin_webapp.response.LoginMessage;
+import com.dhruv.PropertySearchLogin_webapp.service.UserService;
+
+@RestController
+@CrossOrigin
+@RequestMapping("/usercheck")
+public class UserController {
+
+	@Autowired
+	private UserService userservice;
+	
+	@PostMapping("/adduser")
+	public String addUser(@RequestBody UserDTO userdto)
+	{String user = userservice.addUser(userdto);
+	  return user;}
+	
+	@PostMapping("/login")
+	public ResponseEntity<?> loginUser(@RequestBody LoginDTO logindto)
+	{ LoginMessage loginmessage = userservice.loginUser(logindto);
+	  return ResponseEntity.ok(loginmessage);}
+}
+
+=============================================================================
+
+LoginMessage.java
+
+package com.dhruv.PropertySearchLogin_webapp.response;
+public class LoginMessage {
+    String message;
+    Boolean status;
+
+    public String getMessage() {
+        return message;
+    }
+
+    public void setMessage(String message) {
+        this.message = message;
+    }
+
+    public Boolean getStatus() {
+        return status;
+    }
+
+    public void setStatus(Boolean status) {
+        this.status = status;
+    }
+
+    public LoginMessage(String message, Boolean status) {
+        this.message = message;
+        this.status = status;
+    }
+}

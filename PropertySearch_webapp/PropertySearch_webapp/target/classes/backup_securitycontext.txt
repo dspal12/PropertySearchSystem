@@ -1,0 +1,335 @@
+SecurityConfig.java
+
+-------------------------------------------------------------
+
+package com.dhruv.PropertySearchLogin_webapp.config;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+import com.dhruv.PropertySearchLogin_webapp.Service.UserDetailsServiceImpl;
+
+@SuppressWarnings("deprecation")
+@Configuration
+@EnableWebSecurity
+@EnableGlobalMethodSecurity(prePostEnabled=true)
+public class SecurityConfig extends WebSecurityConfigurerAdapter {
+	
+	@Autowired
+	private JwtAuthenticationEntryPoint unauthorizedHandler;
+	
+	@Autowired
+	private JwtTokenAuthenticationFilter authenticationJwtTokenFilter;
+
+	@Autowired
+	private UserDetailsServiceImpl userdetailsServiceimpl;
+	
+	
+    @Override
+    @Bean
+	public AuthenticationManager authenticationManagerBean() throws Exception
+	{
+		return super.authenticationManagerBean();
+	}
+	
+	@Bean
+    public PasswordEncoder passwordEncoder(){
+        return NoOpPasswordEncoder.getInstance();
+    }
+	
+	
+	@Bean
+	public  BCryptPasswordEncoder passwordEncoder() {
+		return new BCryptPasswordEncoder();
+
+	}
+	
+	@Override
+	protected void configure(AuthenticationManagerBuilder auth) throws Exception{
+		auth.userDetailsService(this.userdetailsServiceimpl).passwordEncoder(passwordEncoder());
+	}
+	
+	@SuppressWarnings("deprecation")
+	@Override
+	protected void configure(HttpSecurity http) throws Exception{
+		
+		http.csrf()
+		     .disable()
+		     .cors()
+		     .disable()
+		     .authorizeRequests().antMatchers("/generate-token","/user/").permitAll()
+		     .antMatchers(HttpMethod.OPTIONS).permitAll()
+		     .anyRequest().authenticated().and()
+		     .exceptionHandling().authenticationEntryPoint(unauthorizedHandler).and()
+		     .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS);
+		
+		//filtering the valid token 
+		http.addFilterBefore(authenticationJwtTokenFilter, UsernamePasswordAuthenticationFilter.class);
+		 
+	}
+}
+=======================================================================================================
+
+JwtUtil.java
+
+-----------------------------------------------------------------------------
+package com.dhruv.PropertySearchLogin_webapp.config;
+
+
+import io.jsonwebtoken.Claims;
+
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
+
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Function;
+
+@Component
+public class JwtUtil {
+	//this class provides the utility functions for token and its usages
+
+	 private String SECRET_KEY = "propertysearch";
+	 //using these key it will form a token
+
+	    public String extractUsername(String token) {
+	        return extractClaim(token, Claims::getSubject);
+	    }
+
+	    public Date extractExpiration(String token) {
+	        return extractClaim(token, Claims::getExpiration);
+	    }
+
+	    public <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
+	        final Claims claims = extractAllClaims(token);
+	        return claimsResolver.apply(claims);
+	    }
+	    private Claims extractAllClaims(String token) {
+	        return Jwts.parser().setSigningKey(SECRET_KEY).parseClaimsJws(token).getBody();
+	    }
+
+	    private Boolean isTokenExpired(String token) {
+	        return extractExpiration(token).before(new Date());
+	    }
+
+	    public String generateToken(UserDetails userDetails) {
+	        Map<String, Object> claims = new HashMap<>();
+	        return createToken(claims, userDetails.getUsername());
+	    }
+
+	    private String createToken(Map<String, Object> claims, String subject) {
+
+	        return Jwts.builder().setClaims(claims).setSubject(subject).setIssuedAt(new Date(System.currentTimeMillis()))
+	                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 10))
+	                .signWith(SignatureAlgorithm.HS256, SECRET_KEY).compact();
+	    }
+
+	    public Boolean validateToken(String token, UserDetails userDetails) {
+	        final String username = extractUsername(token);
+	        return (username.equals(userDetails.getUsername()) && !isTokenExpired(token));
+	    }
+}
+================================================================================================
+
+JwtTokenAuthenticationFilter.java
+
+--------------------------------------------------------------------------------------
+package com.dhruv.PropertySearchLogin_webapp.config;
+
+import java.io.IOException;
+
+import javax.servlet.FilterChain;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import com.dhruv.PropertySearchLogin_webapp.Service.UserDetailsServiceImpl;
+
+import io.jsonwebtoken.ExpiredJwtException;
+
+@Component
+public class JwtTokenAuthenticationFilter extends OncePerRequestFilter{
+
+	
+	@Autowired
+	private UserDetailsServiceImpl userDetailsService;
+	
+	
+	//this class contains the useful methods for generating token,validating token
+	
+	@Autowired
+	private JwtUtil jwtUtil;
+	@Override
+	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+			throws ServletException, IOException {
+	
+		final String requestTokenHeader =response.getHeader("Authorization");
+		System.out.println(requestTokenHeader);
+		String username = null;
+		String jwtToken= null;
+		
+		if(requestTokenHeader!=null && requestTokenHeader.startsWith("Bearer "))
+		{
+			jwtToken = requestTokenHeader.substring(7);
+			try
+			{username = this.jwtUtil.extractUsername(jwtToken);}
+			catch(ExpiredJwtException e){
+				e.printStackTrace();
+				System.out.println("token has expired");
+			}
+			catch(Exception e)
+			{
+				e.printStackTrace();
+				System.out.println("token has error");
+			}
+		}
+		else
+		{
+		System.out.println("invalid token,header not started with bearer");
+		}
+		//validation of token starts here
+		
+		if(username!=null && SecurityContextHolder.getContext().getAuthentication()==null )
+		{
+			final UserDetails userdetails = this.userDetailsService.loadUserByUsername(username);
+			if (this.jwtUtil.validateToken(jwtToken, userdetails))
+			{
+				//if token is valid
+				UsernamePasswordAuthenticationToken usernamepasswordAuthToken = 
+						new UsernamePasswordAuthenticationToken(userdetails,null,userdetails.getAuthorities());
+				usernamepasswordAuthToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+				SecurityContextHolder.getContext().setAuthentication(usernamepasswordAuthToken);
+			}
+			else
+			{System.out.println("Token isnt valid");}
+			
+		}
+		
+		filterChain.doFilter(request, response);
+	}
+	
+	
+	
+
+}
+==================================================================================
+JwtAuthenticationEntryPoint.java
+
+-------------------------------------------------------------------------------------------
+package com.dhruv.PropertySearchLogin_webapp.config;
+
+import java.io.IOException;
+
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.stereotype.Component;
+
+@Component
+public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
+
+	@Override
+	public void commence(HttpServletRequest request, HttpServletResponse response,
+			AuthenticationException authException) throws IOException, ServletException {
+		response
+		.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Not authorized to access");
+		
+	}
+
+}
+============================================================================================================
+From Controlller Package
+
+AuthenticationController
+
+package com.dhruv.PropertySearchLogin_webapp.controller;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.dhruv.PropertySearchLogin_webapp.Service.UserDetailsServiceImpl;
+import com.dhruv.PropertySearchLogin_webapp.config.JwtUtil;
+import com.dhruv.PropertySearchLogin_webapp.entity.JwtRequest;
+import com.dhruv.PropertySearchLogin_webapp.entity.JwtResponse;
+
+@RestController
+public class AuthenticationController {
+	
+	@Autowired
+	private AuthenticationManager authenticationManager;
+	@Autowired
+	private UserDetailsServiceImpl userdetailsServiceImpl;
+	
+	@Autowired
+	private JwtUtil jwtUtils;
+	
+	//generate Token
+	@PostMapping("/generate-token")
+	public ResponseEntity<?> generateToken(@RequestBody JwtRequest jwtRequest) throws Exception 
+	{
+		try
+		{
+			authenticate(jwtRequest.getUsername(),jwtRequest.getPassword());
+			
+		}catch(UserNotFoundException e) 
+		{
+			e.printStackTrace();
+			throw new Exception("user not found");
+		}
+		
+		UserDetails userDetails =this.userdetailsServiceImpl.loadUserByUsername(jwtRequest.getUsername());
+		String token = this.jwtUtils.generateToken(userDetails);
+		return ResponseEntity.ok(new JwtResponse(token));
+	}
+	
+	private void authenticate(String username, String password) throws Exception
+	{
+		try
+		{
+			authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(username,password));
+			
+		}catch(DisabledException e) 
+		{
+			throw new Exception("User Disabled");
+		}catch(BadCredentialsException e) {
+			throw new Exception("Invalid Credentials");
+		}
+	}
+
+}
+
